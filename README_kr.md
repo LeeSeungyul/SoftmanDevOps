@@ -1,3 +1,4 @@
+[English Version](README.md)
 # SoftmanDevOps 서비스
 
 SoftmanDevOps는 엄격한 검증, 재시도, 타임아웃 및 동시성 정책을 적용하면서 SonarQube의 `/api/measures/component` 엔드포인트를 프록시하는 독립형 Java 21 HTTP 서비스입니다.

@@ -1,3 +1,4 @@
+[한국어 버전](README_kr.md)
 # SoftmanDevOps Service
 
 SoftmanDevOps is a standalone Java 21 HTTP service that proxies SonarQube's `/api/measures/component` endpoint while enforcing strict validation, retry, timeout, and concurrency policies.
