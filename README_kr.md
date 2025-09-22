@@ -101,6 +101,19 @@ curl -X POST http://localhost:5050/sonar/metrics \
   }'
 ```
 
+## 결과 예시
+```json
+{
+  "status": "SUCCESS",
+  "custid": "ci-pipeline-01",
+  "result": [
+    { "metric": "bugs", "value": "12", "bestValue": false },
+    { "metric": "vulnerabilities", "value": "0", "bestValue": true },
+    { "metric": "security_hotspots", "value": "3", "bestValue": false }
+  ]
+}
+```
+
 ## 테스트 커버리지
 JUnit 5 테스트에는 다음이 포함됩니다:
 - CLI 파싱 및 기본 처리

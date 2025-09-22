@@ -101,6 +101,19 @@ curl -X POST http://localhost:5050/sonar/metrics \
   }'
 ```
 
+### Example Response
+```json
+{
+  "status": "SUCCESS",
+  "custid": "ci-pipeline-01",
+  "result": [
+    { "metric": "bugs", "value": "12", "bestValue": false },
+    { "metric": "vulnerabilities", "value": "0", "bestValue": true },
+    { "metric": "security_hotspots", "value": "3", "bestValue": false }
+  ]
+}
+```
+
 ## Test Coverage
 JUnit 5 tests include:
 - CLI parsing and default handling
