@@ -2,6 +2,7 @@
 *.class
 
 # Log file
+/logs
 *.log
 
 # BlueJ files
@@ -10,8 +11,13 @@
 # Mobile Tools for Java (J2ME)
 .mtj.tmp/
 
+#build files
+/build
+/.gradle
+
 # Package Files #
 *.jar
+!SoftmanDevOps.jar
 *.war
 *.nar
 *.ear
@@ -19,6 +25,21 @@
 *.tar.gz
 *.rar
 
+# IDE-specific files and directories
+.idea/
+*.iml
+.vscode/
+
+# Test-related build outputs
+test-results/
+jacoco/
+
+# Temporary/extra files
+*.out
+*.tmp
+
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+.DS_Store
