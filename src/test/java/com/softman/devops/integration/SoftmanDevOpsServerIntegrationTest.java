@@ -1,9 +1,11 @@
 package com.softman.devops.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.softman.devops.SoftmanDevOpsServer;
@@ -28,7 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class SoftmanDevOpsServerIntegrationTest {
-    private static final Gson GSON = new Gson();
+    private static final Gson GSON = new GsonBuilder().serializeNulls().create();
 
     private SonarStubServer sonarStubServer;
     private SoftmanDevOpsServer softmanServer;
@@ -73,6 +75,7 @@ class SoftmanDevOpsServerIntegrationTest {
                 .build();
 
         HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        System.out.println("Raw body: " + httpResponse.body());
         assertEquals(200, httpResponse.statusCode());
 
         JsonObject body = GSON.fromJson(httpResponse.body(), JsonObject.class);
@@ -235,6 +238,205 @@ class SoftmanDevOpsServerIntegrationTest {
         assertEquals("TOO_MANY_REQUESTS", body.get("status").getAsString());
 
         ongoing.get(3, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void batchRequestReturnsPartialSuccess() throws Exception {
+        JsonObject measure = new JsonObject();
+        measure.addProperty("metric", "coverage");
+        measure.addProperty("value", "81.0");
+        measure.addProperty("bestValue", true);
+        JsonArray measures = new JsonArray();
+        measures.add(measure);
+        JsonObject component = new JsonObject();
+        component.add("measures", measures);
+        JsonObject response = new JsonObject();
+        response.add("component", component);
+        sonarStubServer.enqueue(ResponsePlan.success(response));
+        sonarStubServer.enqueue(ResponsePlan.status(503));
+
+        startServer(3, Duration.ofSeconds(2), Duration.ofSeconds(10));
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("baseurl", "http://localhost:" + sonarStubServer.port());
+        payload.addProperty("token", "token-value");
+        JsonArray data = new JsonArray();
+
+        JsonObject firstItem = new JsonObject();
+        firstItem.addProperty("component", "project-a");
+        firstItem.addProperty("metrics", "coverage");
+        data.add(firstItem);
+
+        JsonObject secondItem = new JsonObject();
+        secondItem.addProperty("component", "project-b");
+        secondItem.addProperty("metrics", "bugs");
+        secondItem.addProperty("custid", "ci-002");
+        secondItem.addProperty("retries", 0);
+        data.add(secondItem);
+
+        payload.add("data", data);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + serverPort + "/sonar/metrics_batch"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+
+        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(200, httpResponse.statusCode());
+
+        JsonObject body = GSON.fromJson(httpResponse.body(), JsonObject.class);
+        assertEquals("PARTIAL_SUCCESS", body.get("status").getAsString());
+
+        JsonArray results = body.getAsJsonArray("results");
+        assertEquals(2, results.size());
+        JsonObject firstResult = results.get(0).getAsJsonObject();
+        assertEquals("SUCCESS", firstResult.get("status").getAsString());
+        assertEquals("project-a", firstResult.get("component").getAsString());
+        assertEquals("coverage", firstResult.get("metric01").getAsString());
+        assertEquals("81.0", firstResult.get("value01").getAsString());
+        assertTrue(firstResult.get("bestValue01").getAsBoolean());
+        JsonObject secondResult = results.get(1).getAsJsonObject();
+        assertEquals("UPSTREAM_5XX", secondResult.get("status").getAsString());
+        assertEquals("project-b", secondResult.get("component").getAsString());
+        assertTrue(secondResult.get("metric01").isJsonNull());
+        assertTrue(secondResult.get("value01").isJsonNull());
+        assertTrue(secondResult.get("bestValue01").isJsonNull());
+    }
+
+    @Test
+    void batchRequestMissingBaseUrlFailsValidation() throws Exception {
+        startServer(2, Duration.ofSeconds(2), Duration.ofSeconds(10));
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("token", "token-value");
+        JsonArray data = new JsonArray();
+        JsonObject firstItem = new JsonObject();
+        firstItem.addProperty("component", "project-a");
+        firstItem.addProperty("metrics", "coverage");
+        data.add(firstItem);
+        payload.add("data", data);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + serverPort + "/sonar/metrics_batch"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+
+        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(400, httpResponse.statusCode());
+        JsonObject body = GSON.fromJson(httpResponse.body(), JsonObject.class);
+        assertEquals("BAD_REQUEST", body.get("status").getAsString());
+        assertTrue(body.get("message").getAsString().contains("DATA[0]"));
+    }
+
+    @Test
+    void batchRequestAcceptsUppercaseDataKey() throws Exception {
+        JsonObject measure = new JsonObject();
+        measure.addProperty("metric", "coverage");
+        measure.addProperty("value", "90.0");
+        JsonArray measures = new JsonArray();
+        measures.add(measure);
+        JsonObject component = new JsonObject();
+        component.add("measures", measures);
+        JsonObject response = new JsonObject();
+        response.add("component", component);
+        sonarStubServer.enqueue(ResponsePlan.success(response));
+
+        startServer(2, Duration.ofSeconds(2), Duration.ofSeconds(10));
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("baseurl", "http://localhost:" + sonarStubServer.port());
+        payload.addProperty("token", "token-value");
+        JsonArray data = new JsonArray();
+        JsonObject item = new JsonObject();
+        item.addProperty("component", "project-a");
+        item.addProperty("metrics", "coverage");
+        data.add(item);
+        payload.add("DATA", data);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + serverPort + "/sonar/metrics_batch"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+
+        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(200, httpResponse.statusCode());
+        JsonObject body = GSON.fromJson(httpResponse.body(), JsonObject.class);
+        assertEquals("SUCCESS", body.get("status").getAsString());
+        JsonArray results = body.getAsJsonArray("results");
+        assertEquals(1, results.size());
+        assertEquals("project-a", results.get(0).getAsJsonObject().get("component").getAsString());
+    }
+
+    @Test
+    void batchRequestReturnsMetricsInRequestedOrder() throws Exception {
+        JsonArray measures = new JsonArray();
+
+        JsonObject coverage = new JsonObject();
+        coverage.addProperty("metric", "coverage");
+        coverage.addProperty("value", "83.7");
+        coverage.addProperty("bestValue", true);
+        measures.add(coverage);
+
+        JsonObject securityHotspots = new JsonObject();
+        securityHotspots.addProperty("metric", "security_hotspots");
+        securityHotspots.addProperty("value", "4");
+        securityHotspots.addProperty("bestValue", false);
+        measures.add(securityHotspots);
+
+        JsonObject bugs = new JsonObject();
+        bugs.addProperty("metric", "bugs");
+        bugs.addProperty("value", "2");
+        bugs.addProperty("bestValue", false);
+        measures.add(bugs);
+
+        JsonObject component = new JsonObject();
+        component.add("measures", measures);
+        JsonObject response = new JsonObject();
+        response.add("component", component);
+        sonarStubServer.enqueue(ResponsePlan.success(response));
+
+        startServer(3, Duration.ofSeconds(2), Duration.ofSeconds(10));
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("baseurl", "http://localhost:" + sonarStubServer.port());
+        payload.addProperty("token", "token-value");
+        JsonArray data = new JsonArray();
+        JsonObject item = new JsonObject();
+        item.addProperty("component", "project-c");
+        item.addProperty("metrics", "bugs,coverage,security_hotspots");
+        data.add(item);
+        payload.add("data", data);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + serverPort + "/sonar/metrics_batch"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+
+        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(200, httpResponse.statusCode());
+
+        JsonObject body = GSON.fromJson(httpResponse.body(), JsonObject.class);
+        JsonArray results = body.getAsJsonArray("results");
+        assertEquals(1, results.size());
+        JsonObject first = results.get(0).getAsJsonObject();
+        assertEquals("SUCCESS", first.get("status").getAsString());
+        assertEquals("project-c", first.get("component").getAsString());
+
+        assertEquals("bugs", first.get("metric01").getAsString());
+        assertEquals("2", first.get("value01").getAsString());
+        assertFalse(first.get("bestValue01").getAsBoolean());
+
+        assertEquals("coverage", first.get("metric02").getAsString());
+        assertEquals("83.7", first.get("value02").getAsString());
+        assertTrue(first.get("bestValue02").getAsBoolean());
+
+        assertEquals("security_hotspots", first.get("metric03").getAsString());
+        assertEquals("4", first.get("value03").getAsString());
+        assertFalse(first.get("bestValue03").getAsBoolean());
     }
 
     private void startServer(int maxConnections, Duration timeout, Duration jobTimeout) {

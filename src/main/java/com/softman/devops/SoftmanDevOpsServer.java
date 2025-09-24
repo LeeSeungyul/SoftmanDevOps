@@ -2,6 +2,7 @@ package com.softman.devops;
 
 import com.google.gson.Gson;
 import com.softman.devops.config.ServiceConfiguration;
+import com.softman.devops.handler.BatchSonarMetricsHandler;
 import com.softman.devops.handler.SonarMetricsHandler;
 import com.softman.devops.service.SonarMetricsService;
 import com.sun.net.httpserver.HttpServer;
@@ -39,6 +40,8 @@ public final class SoftmanDevOpsServer {
         this.httpServer.setExecutor(executorService);
         this.httpServer.createContext("/sonar/metrics",
                 new SonarMetricsHandler(sonarMetricsService, gson, activeRequests, maxConnections));
+        this.httpServer.createContext("/sonar/metrics_batch",
+                new BatchSonarMetricsHandler(sonarMetricsService, gson, activeRequests, maxConnections));
     }
 
     public void start() {

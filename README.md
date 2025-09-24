@@ -80,7 +80,7 @@ Response body on failure:
 ```
 ./gradlew build        # or `gradle build` if the wrapper is unavailable
 ```
-This runs compilation, unit/integration tests, and Jacoco coverage verification (line ≥ 80%, branch ≥ 70%). The assembled fat jar is produced at `build/libs/SoftmanDevOps.jar`.
+This command must be executed from the repository root and requires JDK 21. It performs compilation, unit/integration tests, and Jacoco coverage verification (line ≥ 80%, branch ≥ 70%), then emits the runnable fat jar at `build/libs/SoftmanDevOps.jar`.
 
 ```
 ./gradlew test         # run tests only
@@ -113,6 +113,88 @@ curl -X POST http://localhost:5050/sonar/metrics \
   ]
 }
 ```
+
+## Batch Endpoint
+- **URL**: `/sonar/metrics_batch`
+- **Method**: `POST`
+- **Purpose**: Execute multiple SonarQube lookups with one HTTP call. Batch items run sequentially and share the same configured job deadline.
+
+### Top-Level Fields
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `baseurl` | string | ❌ | Default SonarQube base URL; each item must supply one either here or inline. |
+| `token` | string | ❌ | Default SonarQube token; items can override it per entry. |
+| `retries` | number | ❌ | Default retry count for items that omit `retries` (defaults to 3). |
+| `data` / `DATA` | array | ✅ | Ordered array of batch items. |
+
+### Item Object Fields (`data[]`)
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `baseurl` | string | ❌ | Overrides the top-level `baseurl` for this item. |
+| `token` | string | ❌ | Overrides the top-level `token` for this item. |
+| `component` | string | ✅ | SonarQube project key. |
+| `metrics` | string | ✅ | Comma-separated lowercase metric keys. |
+| `branch` | string | ❌ | Branch to query (`pull_request` takes precedence). |
+| `pull_request` | string | ❌ | Pull request identifier. |
+| `retries` | number | ❌ | Retry count for this item only. |
+| `custid` | string | ❌ | Optional identifier echoed in the item response. |
+
+Missing `baseurl` or `token` on an item is resolved from the top-level values, and all item fields must stay primitive (no nested objects/arrays). The usual concurrency limiter still applies, so a batch call consumes one slot regardless of the number of items.
+
+### Batch Example Request
+```bash
+curl -X POST http://localhost:5050/sonar/metrics_batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "baseurl": "https://sonar.example.com",
+    "token": "sonar-token",
+    "retries": 2,
+    "data": [
+      {
+        "component": "project-a",
+        "metrics": "coverage,bugs",
+        "custid": "ci-batch-01"
+      },
+      {
+        "component": "project-b",
+        "metrics": "security_hotspots",
+        "branch": "dev",
+        "retries": 0
+      }
+    ]
+  }'
+```
+
+### Batch Example Response
+```json
+{
+  "status": "PARTIAL_SUCCESS",
+  "results": [
+    {
+      "component": "project-a",
+      "custid": "ci-batch-01",
+      "status": "SUCCESS",
+      "metric01": "coverage",
+      "value01": "81.0",
+      "bestValue01": true,
+      "metric02": "bugs",
+      "value02": "5",
+      "bestValue02": false
+    },
+    {
+      "component": "project-b",
+      "status": "UPSTREAM_5XX",
+      "metric01": null,
+      "value01": null,
+      "bestValue01": null
+    }
+  ]
+}
+```
+
+Batch-level `status` values are `SUCCESS` (all items succeeded), `PARTIAL_SUCCESS` (mixture), or `FAILED` (all items failed). Individual item statuses re-use the single-request status codes. Successful metrics are flattened into `metricNN` / `valueNN` / `bestValueNN` fields (`NN` = `01`, `02`, ...); failed items reuse the same keys with `null` values.
+
+The flattened entries follow the same order you provide in `data[].metrics`. Even if SonarQube responds with a different ordering, the handler re-aligns each metric/value pair so `metric01` matches the first requested key, `metric02` the second, and so on.
 
 ## Test Coverage
 JUnit 5 tests include:

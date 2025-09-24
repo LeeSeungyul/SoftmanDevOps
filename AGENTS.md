@@ -1,38 +1,23 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/main/java/com/softman/devops/**` hosts CLI bootstrap, HTTP handlers, services, factories, and DTOs; introduce new features inside matching packages.
-- Runtime configs belong in `src/main/resources` (e.g., `logback.xml`); ship new assets here so they stay on the classpath.
-- Tests mirror the main tree under `src/test/java` with `integration/` suites and reusable stubs in `support/`; place fixtures in `src/test/resources`.
-- Gradle outputs live under `build/`; the fat jar publishes to `build/libs/SoftmanDevOps.jar`.
+Keep production code under `src/main/java/com/softman/devops/**`, grouping classes by role (`cli`, `handler`, `service`, `factory`, `dto`). Runtime resources such as `logback.xml` live in `src/main/resources` so they travel with the jar. Mirror the tree in `src/test/java`, placing HTTP stubs under `support/` and integration specs in `integration/`. Fixtures belong in `src/test/resources`. Build artefacts are generated in `build/`, with the runnable jar emitted at `build/libs/SoftmanDevOps.jar`.
 
 ## Build, Test, and Development Commands
-```bash
-gradle build            # compile, run tests, enforce Jacoco gates
-gradle test             # unit + integration tests only
-gradle run --args="--port 5050 --logdir logs"  # launch locally
-gradle jacocoTestReport # generate coverage report at build/reports/jacoco/test/html
-java -jar build/libs/SoftmanDevOps.jar --port 5050  # run packaged jar
-```
+- `gradle build` — compiles, runs every test suite, and enforces Jacoco quality gates.
+- `gradle test` — executes unit and integration tests without packaging.
+- `gradle run --args="--port 5050 --logdir logs"` — launches the CLI locally with explicit runtime options.
+- `gradle jacocoTestReport` — produces HTML coverage at `build/reports/jacoco/test/html/index.html`.
+- `java -jar build/libs/SoftmanDevOps.jar --port 5050` — validates the shaded jar in the same way production does.
 
 ## Coding Style & Naming Conventions
-- Target Java 21, four-space indentation, braces on new lines as in existing classes.
-- Favor immutable records for request/response DTOs and `final` classes for utilities.
-- Keep package names descriptive (`cli`, `handler`, `service`, `factory`); suffix classes after their role (`*Parser`, `*Handler`).
-- Log through SLF4J (`LoggerFactory.getLogger(...)`) and avoid logging sensitive Sonar tokens.
+Target Java 21 with four-space indentation and braces on their own lines, matching existing classes. Prefer records for immutable DTOs and mark helper utilities as `final`. Use descriptive package names and suffix classes with their responsibility (`SonarMetricsHandler`, `CommandLineParser`). Log exclusively through SLF4J (`LoggerFactory.getLogger(...)`) and omit sensitive tokens from output.
 
 ## Testing Guidelines
-- JUnit 5 drives tests; suffix classes with `Test` and use descriptive method names (`launchStartsServerAndServesRequests`).
-- Integration tests live in `integration/` and rely on `support/SonarStubServer`; grab ports with `TestPorts.findAvailablePort()` to prevent collisions.
-- `gradle check` enforces Jacoco thresholds (line ≥ 80%, branch ≥ 70%); publish detailed coverage via `gradle jacocoTestReport`.
-- Clean up temp files and stub servers in `@AfterEach` to keep suites deterministic.
+Write JUnit 5 tests with descriptive method names such as `launchStartsServerAndServesRequests`. Integration tests should acquire ports via `TestPorts.findAvailablePort()` and tear down `SonarStubServer` instances in `@AfterEach`. Maintain coverage thresholds by running `gradle check`; branch coverage must stay ≥70% and line coverage ≥80%. When adding fixtures or stub payloads, keep them small and store them beside the suite in `src/test/resources`.
 
 ## Commit & Pull Request Guidelines
-- Existing commits use short, imperative subjects with Conventional Commit prefixes (e.g., `feat: add port validation`, `test: harden retry stub`); mirror this tone.
-- Group related changes per commit and reference the impacted module in the scope when it helps (`fix(handler): guard null metrics`).
-- Pull requests should explain behaviour, list validation commands (`gradle build`), and link issues; attach CLI or HTTP samples when altering request/response shapes.
-- Include log snippets or screenshots whenever log format, concurrency limits, or timeouts change so reviewers can verify impact.
+Follow Conventional Commit subjects (`feat:`, `fix(handler):`, `test:`) written in the imperative and scoped when helpful. Consolidate related work per commit and explain behavioural changes in the body. Pull requests need a concise summary, linked issue or ticket, and the validation commands you ran (e.g., `gradle build`). Include sample CLI invocations or response snippets when interfaces change to help reviewers verify impact.
 
 ## Security & Configuration Notes
-- Route new configuration flags through `CommandLineOptions`, `ConfigurationFactory`, and `ServiceConfiguration` to preserve validation.
-- Keep production logging configured via `LoggingInitializer`; never write raw credentials to stdout or logs.
+Thread new configuration flags through `CommandLineOptions`, `ConfigurationFactory`, and `ServiceConfiguration` so validation stays centralized. Keep logging wired via `LoggingInitializer` and never echo credentials or API tokens to stdout or the logs. Prefer environment variables or secure stores for secrets referenced during development.
