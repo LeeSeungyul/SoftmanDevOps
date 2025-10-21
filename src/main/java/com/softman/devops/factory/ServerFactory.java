@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.softman.devops.SoftmanDevOpsServer;
 import com.softman.devops.config.ServiceConfiguration;
+import com.softman.devops.service.JenkinsSonarForwardingService;
 import com.softman.devops.service.SonarMetricsService;
 
 public final class ServerFactory {
@@ -15,9 +16,10 @@ public final class ServerFactory {
         validateConfiguration(configuration);
 
         Gson gson = createGson();
-        SonarMetricsService service = createSonarMetricsService(configuration);
+        SonarMetricsService sonarMetricsService = createSonarMetricsService(configuration);
+        JenkinsSonarForwardingService jenkinsSonarForwardingService = createJenkinsSonarForwardingService(configuration);
 
-        return new SoftmanDevOpsServer(configuration, service, gson);
+        return new SoftmanDevOpsServer(configuration, sonarMetricsService, jenkinsSonarForwardingService, gson);
     }
 
     private static Gson createGson() {
@@ -31,6 +33,10 @@ public final class ServerFactory {
             configuration.getRequestTimeout(),
             configuration.getJobTimeout()
         );
+    }
+
+    private static JenkinsSonarForwardingService createJenkinsSonarForwardingService(ServiceConfiguration configuration) {
+        return new JenkinsSonarForwardingService(configuration.getRequestTimeout());
     }
 
     private static void validateConfiguration(ServiceConfiguration configuration) {

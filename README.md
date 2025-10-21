@@ -1,7 +1,7 @@
 [한국어 버전](README_kr.md)
 # SoftmanDevOps Service
 
-SoftmanDevOps is a standalone Java 21 HTTP service that proxies SonarQube's `/api/measures/component` endpoint while enforcing strict validation, retry, timeout, and concurrency policies.
+SoftmanDevOps is a standalone Java 21 HTTP service that proxies SonarQube's `/api/measures/component` endpoint and forwards Jenkins deployment payloads while enforcing strict validation, retry, timeout, and concurrency policies.
 
 ## Runtime Requirements
 - OpenJDK 21+
@@ -20,7 +20,9 @@ SoftmanDevOps is a standalone Java 21 HTTP service that proxies SonarQube's `/ap
 ```
 If `--port` is omitted, the service prints the help text and exits.
 
-## HTTP Endpoint
+## HTTP Endpoints
+
+### Sonar Metrics
 - **URL**: `/sonar/metrics`
 - **Method**: `POST`
 - **Request Body**: JSON with primitive properties only.
@@ -71,11 +73,66 @@ Response body on failure:
 { "status": "<CODE>", "message": "Description" }
 ```
 
+### Jenkins Sonar Forwarding
+- **URL**: `/jenkins/sonar`
+- **Method**: `POST`
+- **Consumes / Produces**: `application/json; charset=utf-8`
+- **Purpose**: Accept deployment metadata from Jenkins, validate it, and forward the payload (minus `baseurl`) to a downstream service. HTTP status, headers, and body from the downstream call are returned verbatim.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `baseurl` | string (URL) | ✅ | Target service URL. The request is sent directly to this URL after trimming whitespace. |
+| `SM_ISID` | string | ✅ | Unique identifier. |
+| `SM_DEPUSER` | string | ✅ | Deployment user ID. |
+| `SM_WFDCODE` | string | ✅ | Workflow code. |
+| `DEP_DATE` | string | ✅ | Deployment timestamp (opaque string, no parsing). |
+| `CALL_URL` | string (path) | ✅ | Downstream reference path. Included in the forwarded body but not used to build the outbound URL. |
+| `TABLE_TYPE` | string | ✅ | Table code. |
+| `DEP_JOBS` | array | ✅ | Non-empty array of job objects. |
+| `DEP_JOBS[].NAME` | string | ✅ | Jenkins job name to forward. |
+
+All additional primitive fields are preserved and forwarded with their original casing. Validation failures (missing fields, blank strings, non-string `TABLE_TYPE`, empty `DEP_JOBS`, etc.) result in `400 BAD_REQUEST`.
+
+**Forwarding rules**
+- Target URL = trimmed `baseurl`. (Provide the complete upstream URL, including any path segments or query parameters.)
+- Forwarded body = original JSON minus `baseurl`.
+- Downstream request headers: `Content-Type: application/json; charset=utf-8`, `Accept: application/json`.
+- Upstream HTTP status/headers/body are proxied back to the caller (content-length/transfer-encoding are recalculated).
+
+**Jenkins Example Request**
+```bash
+curl -X POST http://localhost:5050/jenkins/sonar \
+  -H "Content-Type: application/json" \
+  -d '{
+    "baseurl": "http://192.168.0.1/jenkins-result-sonar",
+    "SM_ISID": "175",
+    "SM_DEPUSER": "lee.hyun-ju",
+    "SM_WFDCODE": "DEP_JEN",
+    "DEP_DATE": "2025-10-21 오전 10:46:44",
+    "CALL_URL": "/jenkins-result-sonar",
+    "TABLE_TYPE": "3",
+    "DEP_JOBS": [
+      { "NAME": "sm-test2" },
+      { "NAME": "sm-test3" }
+    ]
+  }'
+```
+
+**Jenkins Example Passthrough Response**
+```
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+X-Trace-Id: trace-001
+
+{ ... original downstream body ... }
+```
+
 ## Behaviour Highlights
 - Global concurrency limit enforced with a fair semaphore; excess requests receive HTTP 429 immediately.
 - Retries use exponential backoff (500ms base, capped at 5s) for network errors, 5xx, and 429. Backoff is aborted if it would violate the job timeout.
 - Effective per-call timeout is `min(--timeout, remaining job deadline)` to satisfy combined timing constraints.
 - JSON parsing uses Gson; external libraries are restricted to Gson and Logback.
+- Jenkins forwarding endpoint reuses the same concurrency limiter and masks destination details in logs while preserving opaque payload fields.
 
 ## Building & Testing
 ```
@@ -207,5 +264,5 @@ JUnit 5 tests include:
 - CLI parsing and default handling
 - DTO validation rules (required fields, metric formatting)
 - Service layer retry/timeout/headers logic with an embedded SonarQube stub
-- HTTP handler integration: validation failures, pull-request precedence, concurrency guard, and response schema
+- HTTP handler integration: validation failures, pull-request precedence, Jenkins forwarding passthrough, concurrency guard, and response schema
 ```

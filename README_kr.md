@@ -1,7 +1,7 @@
 [English Version](README.md)
 # SoftmanDevOps 서비스
 
-SoftmanDevOps는 엄격한 검증, 재시도, 타임아웃 및 동시성 정책을 적용하면서 SonarQube의 `/api/measures/component` 엔드포인트를 프록시하는 독립형 Java 21 HTTP 서비스입니다.
+SoftmanDevOps는 엄격한 검증, 재시도, 타임아웃 및 동시성 정책을 적용하면서 SonarQube의 `/api/measures/component` 엔드포인트를 프록시하고 Jenkins 배포 페이로드를 다운스트림 서비스로 포워딩하는 독립형 Java 21 HTTP 서비스입니다.
 
 ## 런타임 요구사항
 - OpenJDK 21+
@@ -21,6 +21,8 @@ SoftmanDevOps는 엄격한 검증, 재시도, 타임아웃 및 동시성 정책�
 `--port`가 생략되면, 서비스는 도움말 텍스트를 출력하고 종료됩니다.
 
 ## HTTP 엔드포인트
+
+### Sonar Metrics
 - **URL**: `/sonar/metrics`
 - **메서드**: `POST`
 - **요청 본문**: 기본 속성만 포함된 JSON.
@@ -71,11 +73,66 @@ Authorization: Basic base64("{token}:")
 { "status": "<CODE>", "message": "Description" }
 ```
 
+### Jenkins Sonar 포워딩
+- **URL**: `/jenkins/sonar`
+- **메서드**: `POST`
+- **Consumes / Produces**: `application/json; charset=utf-8`
+- **역할**: Jenkins에서 전달되는 배포 메타데이터를 검증한 뒤 `baseurl`만 제외한 본문을 다운스트림 API로 전달합니다. 다운스트림의 HTTP 상태/헤더/본문을 그대로 다시 응답합니다.
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `baseurl` | string (URL) | ✅ | 타깃 서비스 URL. 공백을 제거한 후 이 URL로 바로 요청을 전송합니다. |
+| `SM_ISID` | string | ✅ | 고유 식별자. |
+| `SM_DEPUSER` | string | ✅ | 배포 사용자 ID. |
+| `SM_WFDCODE` | string | ✅ | 워크플로 코드. |
+| `DEP_DATE` | string | ✅ | 배포 시각 문자열 (서버는 파싱하지 않고 그대로 전달). |
+| `CALL_URL` | string (path) | ✅ | 다운스트림 참조 경로. 요청 본문에 그대로 포함되지만 실제 호출 URL 구성에는 사용되지 않습니다. |
+| `TABLE_TYPE` | string | ✅ | 테이블 코드. |
+| `DEP_JOBS` | array | ✅ | 비어 있지 않은 잡 객체 배열. |
+| `DEP_JOBS[].NAME` | string | ✅ | 포워딩할 Jenkins 잡 이름. |
+
+그 외 추가적인 원시 타입 필드는 모두 보존되며 원본 키 이름 그대로 전달됩니다. 필수 필드 누락, 공백 문자열, 문자열이 아닌 `TABLE_TYPE`, 빈 `DEP_JOBS` 등 검증 오류가 발생하면 `400 BAD_REQUEST`를 반환합니다.
+
+**포워딩 규칙**
+- 타깃 URL = 공백을 제거한 `baseurl` 값 자체입니다. (경로/쿼리가 필요하면 `baseurl`에 모두 포함해 전달하세요.)
+- 포워딩 본문 = 원본 JSON에서 `baseurl`만 제거한 나머지 필드 전체.
+- 다운스트림 요청 헤더: `Content-Type: application/json; charset=utf-8`, `Accept: application/json`.
+- 다운스트림 응답의 HTTP 상태/헤더/본문을 그대로 클라이언트에 전달하며, `content-length`/`transfer-encoding`은 서버가 재계산합니다.
+
+**Jenkins 요청 예시**
+```bash
+curl -X POST http://localhost:5050/jenkins/sonar \
+  -H "Content-Type: application/json" \
+  -d '{
+    "baseurl": "http://192.168.0.1/jenkins-result-sonar",
+    "SM_ISID": "175",
+    "SM_DEPUSER": "lee.hyun-ju",
+    "SM_WFDCODE": "DEP_JEN",
+    "DEP_DATE": "2025-10-21 오전 10:46:44",
+    "CALL_URL": "/jenkins-result-sonar",
+    "TABLE_TYPE": "3",
+    "DEP_JOBS": [
+      { "NAME": "sm-test2" },
+      { "NAME": "sm-test3" }
+    ]
+  }'
+```
+
+**Jenkins 응답 예시 (Passthrough)**
+```
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+X-Trace-Id: trace-001
+
+{ ... 다운스트림 원본 본문 ... }
+```
+
 ## 동작 하이라이트
 - 공정한 세마포어로 글로벌 동시성 제한 적용; 초과 요청은 즉시 HTTP 429를 받습니다.
 - 네트워크 오류, 5xx 및 429에 대해 지수 백오프(500ms 기준, 최대 5초)를 사용하여 재시도. 작업 타임아웃을 위반할 경우 백오프가 중단됩니다.
 - 효과적인 호출당 타임아웃은 결합된 타이밍 제약을 충족하기 위해 `min(--timeout, 남은 작업 데드라인)`입니다.
 - JSON 파싱은 Gson 사용; 외부 라이브러리는 Gson과 Logback으로 제한됩니다.
+- Jenkins 포워딩 엔드포인트 역시 동일한 동시성 제한을 공유하며, 로그에는 목적지 정보를 마스킹한 상태로 남습니다. 원본 페이로드의 추가 필드는 손실 없이 유지됩니다.
 
 ## 빌드 및 테스트
 ```
@@ -207,5 +264,5 @@ JUnit 5 테스트에는 다음이 포함됩니다:
 - CLI 파싱 및 기본 처리
 - DTO 검증 규칙 (필수 필드, 메트릭 포맷팅)
 - 임베디드 SonarQube 스텁을 사용한 서비스 레이어 재시도/타임아웃/헤더 로직
-- HTTP 핸들러 통합: 검증 실패, 풀 리퀘스트 우선순위, 동시성 가드 및 응답 스키마
+- HTTP 핸들러 통합: 검증 실패, 풀 리퀘스트 우선순위, Jenkins 포워딩 Passthrough, 동시성 가드 및 응답 스키마
 ```

@@ -12,6 +12,7 @@ import com.softman.devops.SoftmanDevOpsServer;
 import com.softman.devops.config.LogLevel;
 import com.softman.devops.config.ServiceConfiguration;
 import com.softman.devops.service.SonarMetricsService;
+import com.softman.devops.service.JenkinsSonarForwardingService;
 import com.softman.devops.support.SonarStubServer;
 import com.softman.devops.support.SonarStubServer.CapturedRequest;
 import com.softman.devops.support.SonarStubServer.ResponsePlan;
@@ -535,7 +536,8 @@ class SoftmanDevOpsServerIntegrationTest {
         Path logDirectory = Path.of(System.getProperty("java.io.tmpdir"));
         ServiceConfiguration configuration = new ServiceConfiguration(serverPort, maxConnections, timeout, jobTimeout, LogLevel.INFO, logDirectory);
         SonarMetricsService service = new SonarMetricsService(timeout, jobTimeout);
-        softmanServer = new SoftmanDevOpsServer(configuration, service, GSON);
+        JenkinsSonarForwardingService forwardingService = new JenkinsSonarForwardingService(timeout);
+        softmanServer = new SoftmanDevOpsServer(configuration, service, forwardingService, GSON);
         softmanServer.start();
     }
 
