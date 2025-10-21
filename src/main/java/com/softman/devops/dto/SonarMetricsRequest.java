@@ -4,9 +4,12 @@ import com.softman.devops.handler.ValidationException;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -14,6 +17,17 @@ import java.util.regex.Pattern;
 public final class SonarMetricsRequest {
     public static final int DEFAULT_RETRIES = 3;
     private static final Pattern METRIC_TOKEN_PATTERN = Pattern.compile("[a-z0-9_.:-]+");
+
+    private static final Set<String> RESERVED_KEYS = Set.of(
+            "baseurl",
+            "token",
+            "component",
+            "metrics",
+            "branch",
+            "pull_request",
+            "custid",
+            "retries"
+    );
 
     private final String baseUrl;
     private final String token;
@@ -23,6 +37,7 @@ public final class SonarMetricsRequest {
     private final Optional<String> pullRequest;
     private final int retries;
     private final Optional<String> customerId;
+    private final Map<String, JsonElement> metadata;
 
     private SonarMetricsRequest(String baseUrl,
                                 String token,
@@ -31,7 +46,8 @@ public final class SonarMetricsRequest {
                                 Optional<String> branch,
                                 Optional<String> pullRequest,
                                 int retries,
-                                Optional<String> customerId) {
+                                Optional<String> customerId,
+                                Map<String, JsonElement> metadata) {
         this.baseUrl = baseUrl;
         this.token = token;
         this.component = component;
@@ -40,6 +56,7 @@ public final class SonarMetricsRequest {
         this.pullRequest = pullRequest;
         this.retries = retries;
         this.customerId = customerId;
+        this.metadata = Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
     }
 
     public static SonarMetricsRequest fromJson(JsonObject body) throws ValidationException {
@@ -55,7 +72,9 @@ public final class SonarMetricsRequest {
         Optional<String> customerId = readOptionalString(body, "custid");
         int retries = readOptionalNonNegativeInt(body, "retries").orElse(DEFAULT_RETRIES);
 
-        return new SonarMetricsRequest(baseUrl, token, component, metricList, branch, pullRequest, retries, customerId);
+        Map<String, JsonElement> metadata = collectMetadata(body);
+
+        return new SonarMetricsRequest(baseUrl, token, component, metricList, branch, pullRequest, retries, customerId, metadata);
     }
 
     private static void ensureFlatObject(JsonObject body) throws ValidationException {
@@ -175,5 +194,25 @@ public final class SonarMetricsRequest {
 
     public Optional<String> getCustomerId() {
         return customerId;
+    }
+
+    public Map<String, JsonElement> getMetadata() {
+        return metadata;
+    }
+
+    private static Map<String, JsonElement> collectMetadata(JsonObject body) {
+        Map<String, JsonElement> extras = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> entry : body.entrySet()) {
+            String key = entry.getKey();
+            if (RESERVED_KEYS.contains(key)) {
+                continue;
+            }
+            JsonElement element = entry.getValue();
+            if (element == null || element.isJsonNull()) {
+                continue;
+            }
+            extras.put(key, element.deepCopy());
+        }
+        return extras;
     }
 }

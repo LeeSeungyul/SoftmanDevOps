@@ -1,7 +1,9 @@
 package com.softman.devops.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
 import com.softman.devops.handler.ValidationException;
@@ -72,6 +74,19 @@ class SonarMetricsRequestTest {
         nested.addProperty("id", "value");
         json.add("custid", nested);
         assertThrows(ValidationException.class, () -> SonarMetricsRequest.fromJson(json));
+    }
+
+    @Test
+    void preservesAdditionalPrimitiveFieldsAsMetadata() throws Exception {
+        JsonObject json = baseRequest();
+        json.addProperty("customField1", "value-1");
+        json.addProperty("flag_enabled", true);
+
+        SonarMetricsRequest request = SonarMetricsRequest.fromJson(json);
+
+        assertEquals("value-1", request.getMetadata().get("customField1").getAsString());
+        assertTrue(request.getMetadata().get("flag_enabled").getAsBoolean());
+        assertFalse(request.getMetadata().containsKey("component"));
     }
 
     private JsonObject baseRequest() {

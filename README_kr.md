@@ -37,6 +37,7 @@ SoftmanDevOps는 엄격한 검증, 재시도, 타임아웃 및 동시성 정책�
 | `custid` | string | ❌ | 성공 시 다시 반환되는 선택적 소비자 식별자. |
 
 빈 문자열, 대문자 메트릭 이름, 중복 메트릭 항목 또는 중첩된 JSON 구조는 `400 BAD_REQUEST` 응답을 발생시킵니다.
+그 외의 원시 타입 필드는 응답에 그대로 포함되어 `customField1`, `customFlag`와 같은 사용자 메타데이터를 전달할 수 있습니다.
 
 ### 외부 SonarQube 호출
 ```
@@ -97,7 +98,8 @@ curl -X POST http://localhost:5050/sonar/metrics \
     "metrics": "coverage,bugs",
     "branch": "main",
     "retries": 3,
-    "custid": "ci-pipeline-01"
+    "custid": "ci-pipeline-01",
+    "customField1": "batch-trigger-007"
   }'
 ```
 
@@ -106,6 +108,7 @@ curl -X POST http://localhost:5050/sonar/metrics \
 {
   "status": "SUCCESS",
   "custid": "ci-pipeline-01",
+  "customField1": "batch-trigger-007",
   "result": [
     { "metric": "bugs", "value": "12", "bestValue": false },
     { "metric": "vulnerabilities", "value": "0", "bestValue": true },
@@ -140,6 +143,7 @@ curl -X POST http://localhost:5050/sonar/metrics \
 | `custid` | string | ❌ | 항목 응답에 그대로 전달되는 선택적 식별자. |
 
 항목에는 중첩 구조 없이 원시 타입만 허용되며, `baseurl`/`token`은 최상위 값으로 보정됩니다. `/sonar/metrics`와 동일한 동시성 제한이 적용되므로 배치 호출도 단일 슬롯만 사용합니다.
+알 수 없는 원시 키도 각 항목 결과에 그대로 복사됩니다.
 
 ### 배치 요청 예시
 ```bash
@@ -153,7 +157,8 @@ curl -X POST http://localhost:5050/sonar/metrics_batch \
       {
         "component": "project-a",
         "metrics": "coverage,bugs",
-        "custid": "ci-batch-01"
+        "custid": "ci-batch-01",
+        "customField1": "release-203"
       },
       {
         "component": "project-b",
@@ -173,6 +178,7 @@ curl -X POST http://localhost:5050/sonar/metrics_batch \
     {
       "component": "project-a",
       "custid": "ci-batch-01",
+      "customField1": "release-203",
       "status": "SUCCESS",
       "metric01": "coverage",
       "value01": "81.0",

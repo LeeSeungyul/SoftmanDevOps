@@ -172,6 +172,43 @@ class SoftmanDevOpsServerIntegrationTest {
     }
 
     @Test
+    void metadataFieldsEchoedOnSuccess() throws Exception {
+        JsonObject measure = new JsonObject();
+        measure.addProperty("metric", "ncloc");
+        measure.addProperty("value", "1200");
+        JsonArray measures = new JsonArray();
+        measures.add(measure);
+        JsonObject component = new JsonObject();
+        component.add("measures", measures);
+        JsonObject response = new JsonObject();
+        response.add("component", component);
+        sonarStubServer.enqueue(ResponsePlan.success(response));
+
+        startServer(2, Duration.ofSeconds(2), Duration.ofSeconds(10));
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("baseurl", "http://localhost:" + sonarStubServer.port());
+        payload.addProperty("token", "token");
+        payload.addProperty("component", "cust");
+        payload.addProperty("metrics", "ncloc");
+        payload.addProperty("customField1", "ci-pipeline-01");
+        payload.addProperty("customFlag", true);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + serverPort + "/sonar/metrics"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+
+        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(200, httpResponse.statusCode());
+        JsonObject body = GSON.fromJson(httpResponse.body(), JsonObject.class);
+        assertEquals("ci-pipeline-01", body.get("customField1").getAsString());
+        assertTrue(body.get("customFlag").getAsBoolean());
+        assertTrue(body.get("result").isJsonArray());
+    }
+
+    @Test
     void pullRequestOverridesBranch() throws Exception {
         JsonObject measure = new JsonObject();
         measure.addProperty("metric", "bugs");
@@ -302,6 +339,61 @@ class SoftmanDevOpsServerIntegrationTest {
         assertTrue(secondResult.get("metric01").isJsonNull());
         assertTrue(secondResult.get("value01").isJsonNull());
         assertTrue(secondResult.get("bestValue01").isJsonNull());
+    }
+
+    @Test
+    void batchRequestEchoesMetadataFields() throws Exception {
+        JsonObject measure = new JsonObject();
+        measure.addProperty("metric", "bugs");
+        measure.addProperty("value", "12");
+        JsonArray measures = new JsonArray();
+        measures.add(measure);
+        JsonObject component = new JsonObject();
+        component.add("measures", measures);
+        JsonObject response = new JsonObject();
+        response.add("component", component);
+        sonarStubServer.enqueue(ResponsePlan.success(response));
+        sonarStubServer.enqueue(ResponsePlan.success(response));
+
+        startServer(3, Duration.ofSeconds(2), Duration.ofSeconds(10));
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("baseurl", "http://localhost:" + sonarStubServer.port());
+        payload.addProperty("token", "token-value");
+        JsonArray data = new JsonArray();
+
+        JsonObject firstItem = new JsonObject();
+        firstItem.addProperty("component", "project-a");
+        firstItem.addProperty("metrics", "bugs");
+        firstItem.addProperty("customField1", "ci-001");
+        firstItem.addProperty("customFlag", true);
+        data.add(firstItem);
+
+        JsonObject secondItem = new JsonObject();
+        secondItem.addProperty("component", "project-b");
+        secondItem.addProperty("metrics", "bugs");
+        data.add(secondItem);
+
+        payload.add("data", data);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + serverPort + "/sonar/metrics_batch"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+
+        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertEquals(200, httpResponse.statusCode());
+
+        JsonObject body = GSON.fromJson(httpResponse.body(), JsonObject.class);
+        JsonArray results = body.getAsJsonArray("results");
+        JsonObject firstResult = results.get(0).getAsJsonObject();
+        assertEquals("ci-001", firstResult.get("customField1").getAsString());
+        assertTrue(firstResult.get("customFlag").getAsBoolean());
+
+        JsonObject secondResult = results.get(1).getAsJsonObject();
+        assertFalse(secondResult.has("customField1"));
+        assertFalse(secondResult.has("customFlag"));
     }
 
     @Test

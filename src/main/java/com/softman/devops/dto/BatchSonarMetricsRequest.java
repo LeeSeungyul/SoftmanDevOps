@@ -6,9 +6,22 @@ import com.google.gson.JsonObject;
 import com.softman.devops.handler.ValidationException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public final class BatchSonarMetricsRequest {
+    private static final Set<String> RESERVED_KEYS = Set.of(
+            "baseurl",
+            "token",
+            "component",
+            "metrics",
+            "branch",
+            "pull_request",
+            "custid",
+            "retries"
+    );
+
     private final List<BatchItem> items;
 
     private BatchSonarMetricsRequest(List<BatchItem> items) {
@@ -52,6 +65,7 @@ public final class BatchSonarMetricsRequest {
             copyIfPresent(itemObject, merged, "branch");
             copyIfPresent(itemObject, merged, "pull_request");
             copyIfPresent(itemObject, merged, "custid");
+            copyMetadata(itemObject, merged);
 
             Optional<Integer> itemRetries = readOptionalNonNegativeInt(itemObject, "retries");
             if (itemRetries.isPresent()) {
@@ -90,6 +104,19 @@ public final class BatchSonarMetricsRequest {
         JsonElement element = source.get(key);
         if (element != null && !element.isJsonNull()) {
             target.add(key, element);
+        }
+    }
+
+    private static void copyMetadata(JsonObject source, JsonObject target) {
+        for (Map.Entry<String, JsonElement> entry : source.entrySet()) {
+            String key = entry.getKey();
+            if (RESERVED_KEYS.contains(key) || target.has(key)) {
+                continue;
+            }
+            JsonElement element = entry.getValue();
+            if (element != null && !element.isJsonNull()) {
+                target.add(key, element.deepCopy());
+            }
         }
     }
 

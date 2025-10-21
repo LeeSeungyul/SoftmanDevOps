@@ -37,6 +37,7 @@ If `--port` is omitted, the service prints the help text and exits.
 | `custid` | string | ❌ | Optional consumer identifier echoed back on success. |
 
 Blank strings, uppercase metric names, duplicate metric entries, or nested JSON structures cause a `400 BAD_REQUEST` response.
+All other primitive fields are echoed in the response payload, enabling callers to attach custom correlation metadata (e.g. `customField1`, `customFlag`).
 
 ### Outbound SonarQube Call
 ```
@@ -97,7 +98,8 @@ curl -X POST http://localhost:5050/sonar/metrics \
     "metrics": "coverage,bugs",
     "branch": "main",
     "retries": 3,
-    "custid": "ci-pipeline-01"
+    "custid": "ci-pipeline-01",
+    "customField1": "batch-trigger-007"
   }'
 ```
 
@@ -106,6 +108,7 @@ curl -X POST http://localhost:5050/sonar/metrics \
 {
   "status": "SUCCESS",
   "custid": "ci-pipeline-01",
+  "customField1": "batch-trigger-007",
   "result": [
     { "metric": "bugs", "value": "12", "bestValue": false },
     { "metric": "vulnerabilities", "value": "0", "bestValue": true },
@@ -140,6 +143,7 @@ curl -X POST http://localhost:5050/sonar/metrics \
 | `custid` | string | ❌ | Optional identifier echoed in the item response. |
 
 Missing `baseurl` or `token` on an item is resolved from the top-level values, and all item fields must stay primitive (no nested objects/arrays). The usual concurrency limiter still applies, so a batch call consumes one slot regardless of the number of items.
+Unknown primitive keys are preserved per item and reappear in the corresponding result object.
 
 ### Batch Example Request
 ```bash
@@ -153,7 +157,8 @@ curl -X POST http://localhost:5050/sonar/metrics_batch \
       {
         "component": "project-a",
         "metrics": "coverage,bugs",
-        "custid": "ci-batch-01"
+        "custid": "ci-batch-01",
+        "customField1": "release-203"
       },
       {
         "component": "project-b",
@@ -173,6 +178,7 @@ curl -X POST http://localhost:5050/sonar/metrics_batch \
     {
       "component": "project-a",
       "custid": "ci-batch-01",
+      "customField1": "release-203",
       "status": "SUCCESS",
       "metric01": "coverage",
       "value01": "81.0",

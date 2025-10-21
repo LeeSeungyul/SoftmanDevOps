@@ -1,6 +1,7 @@
 package com.softman.devops.handler;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.softman.devops.dto.SonarMetricValue;
@@ -18,6 +19,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -67,7 +69,7 @@ public final class SonarMetricsHandler implements HttpHandler {
             JsonObject jsonObject = parseJson(requestBody);
             SonarMetricsRequest sonarRequest = SonarMetricsRequest.fromJson(jsonObject);
             List<SonarMetricValue> metrics = sonarMetricsService.fetchMetrics(sonarRequest, startTime);
-            sendSuccess(exchange, metrics, sonarRequest.getCustomerId());
+            sendSuccess(exchange, metrics, sonarRequest.getCustomerId(), sonarRequest.getMetadata());
         } catch (ValidationException validationException) {
             LOGGER.info("Validation failure: {}", validationException.getMessage());
             sendError(exchange, 400, "BAD_REQUEST", validationException.getMessage());
@@ -100,10 +102,14 @@ public final class SonarMetricsHandler implements HttpHandler {
         return jsonObject;
     }
 
-    private void sendSuccess(HttpExchange exchange, List<SonarMetricValue> metrics, Optional<String> customerId) throws IOException {
+    private void sendSuccess(HttpExchange exchange,
+                             List<SonarMetricValue> metrics,
+                             Optional<String> customerId,
+                             Map<String, JsonElement> metadata) throws IOException {
         JsonObject response = new JsonObject();
         response.addProperty("status", "SUCCESS");
         customerId.ifPresent(id -> response.addProperty("custid", id));
+        addMetadata(response, metadata);
         response.add("result", gson.toJsonTree(metrics));
         sendJson(exchange, 200, response);
     }
@@ -123,6 +129,16 @@ public final class SonarMetricsHandler implements HttpHandler {
         exchange.sendResponseHeaders(statusCode, data.length);
         try (OutputStream outputStream = exchange.getResponseBody()) {
             outputStream.write(data);
+        }
+    }
+
+    private void addMetadata(JsonObject target, Map<String, JsonElement> metadata) {
+        for (Map.Entry<String, JsonElement> entry : metadata.entrySet()) {
+            String key = entry.getKey();
+            if (target.has(key)) {
+                continue;
+            }
+            target.add(key, entry.getValue().deepCopy());
         }
     }
 

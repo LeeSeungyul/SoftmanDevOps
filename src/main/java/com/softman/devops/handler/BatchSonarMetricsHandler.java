@@ -2,6 +2,7 @@ package com.softman.devops.handler;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -88,6 +89,7 @@ public final class BatchSonarMetricsHandler implements HttpHandler {
             JsonObject itemResult = new JsonObject();
             itemResult.addProperty("component", item.request().getComponent());
             item.request().getCustomerId().ifPresent(id -> itemResult.addProperty("custid", id));
+            addMetadata(itemResult, item.request().getMetadata());
             try {
                 List<SonarMetricValue> metrics = sonarMetricsService.fetchMetrics(item.request(), startTime);
                 itemResult.addProperty("status", "SUCCESS");
@@ -161,6 +163,16 @@ public final class BatchSonarMetricsHandler implements HttpHandler {
             target.add("metric" + suffix, JsonNull.INSTANCE);
             target.add("value" + suffix, JsonNull.INSTANCE);
             target.add("bestValue" + suffix, JsonNull.INSTANCE);
+        }
+    }
+
+    private void addMetadata(JsonObject target, Map<String, JsonElement> metadata) {
+        for (Map.Entry<String, JsonElement> entry : metadata.entrySet()) {
+            String key = entry.getKey();
+            if (target.has(key)) {
+                continue;
+            }
+            target.add(key, entry.getValue().deepCopy());
         }
     }
 
