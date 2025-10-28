@@ -87,6 +87,8 @@ Response body on failure:
 | `SM_WFDCODE` | string | ✅ | Workflow code. |
 | `DEP_DATE` | string | ✅ | Deployment timestamp (opaque string, no parsing). |
 | `CALL_URL` | string (path) | ✅ | Downstream reference path. Included in the forwarded body but not used to build the outbound URL. |
+| `callurl` | string (URL) | ✅ | Absolute callback URL invoked when every job is marked `skipped`. |
+| `calltime` | number or numeric string (seconds) | ✅ | Delay (in seconds) before the callback is issued. Must be ≥0. |
 | `TABLE_TYPE` | string | ✅ | Table code. |
 | `DEP_JOBS` | array | ✅ | Non-empty array of job objects. |
 | `DEP_JOBS[].NAME` | string | ✅ | Jenkins job name to forward. |
@@ -95,6 +97,7 @@ All additional primitive fields are preserved and forwarded with their original 
 
 **Forwarding rules**
 - Target URL = trimmed `baseurl`. (Provide the complete upstream URL, including any path segments or query parameters.)
+- `DEP_JOBS` entries whose `NAME` equals `"skipped"` are removed before forwarding. If every job is skipped, the service returns a local success response and schedules an asynchronous callback.
 - Forwarded body = original JSON minus `baseurl`.
 - Downstream request headers: `Content-Type: application/json; charset=utf-8`, `Accept: application/json`.
 - Upstream HTTP status/headers/body are proxied back to the caller (content-length/transfer-encoding are recalculated).
@@ -110,6 +113,8 @@ curl -X POST http://localhost:5050/jenkins/sonar \
     "SM_WFDCODE": "DEP_JEN",
     "DEP_DATE": "2025-10-21 오전 10:46:44",
     "CALL_URL": "/jenkins-result-sonar",
+    "callurl": "http://192.168.0.55/internal/callback",
+    "calltime": 5,
     "TABLE_TYPE": "3",
     "DEP_JOBS": [
       { "NAME": "sm-test2" },
@@ -127,12 +132,28 @@ X-Trace-Id: trace-001
 { ... original downstream body ... }
 ```
 
+**All Jobs Skipped Response**
+```json
+{
+  "SM_ISID": "175",
+  "SM_DEPUSER": "lee.hyun-ju",
+  "WFDCODE": "DEP_JEN",
+  "RESULT": "SUCCESS"
+}
+```
+
+- When every job is skipped, the service performs the following:
+  1. Responds immediately with the JSON above.
+  2. After `calltime` seconds, issues a `POST` request to `callurl` with the same payload and `Content-Type: application/json; charset=utf-8`.
+  3. Callback delivery is fire-and-forget; failures are logged without retries.
+
 ## Behaviour Highlights
 - Global concurrency limit enforced with a fair semaphore; excess requests receive HTTP 429 immediately.
 - Retries use exponential backoff (500ms base, capped at 5s) for network errors, 5xx, and 429. Backoff is aborted if it would violate the job timeout.
 - Effective per-call timeout is `min(--timeout, remaining job deadline)` to satisfy combined timing constraints.
 - JSON parsing uses Gson; external libraries are restricted to Gson and Logback.
 - Jenkins forwarding endpoint reuses the same concurrency limiter and masks destination details in logs while preserving opaque payload fields.
+- Jenkins forwarding skips `DEP_JOBS` entries named `"skipped"` (lowercase). If nothing remains, it responds locally with `RESULT: "SUCCESS"` and posts the callback payload to `callurl` after `calltime` seconds.
 
 ## Building & Testing
 ```

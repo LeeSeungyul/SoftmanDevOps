@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
@@ -24,6 +25,7 @@ public final class SoftmanDevOpsServer {
 
     private final HttpServer httpServer;
     private final ExecutorService executorService;
+    private final ScheduledExecutorService callbackExecutor;
     private final AtomicInteger activeRequests = new AtomicInteger();
     private final int maxConnections;
     private final CountDownLatch stopLatch = new CountDownLatch(1);
@@ -43,13 +45,20 @@ public final class SoftmanDevOpsServer {
         }
         this.maxConnections = configuration.getMaxConnections();
         this.executorService = Executors.newCachedThreadPool(new NamedThreadFactory());
+        AtomicInteger callbackCounter = new AtomicInteger(1);
+        this.callbackExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setName("jenkins-callback-" + callbackCounter.getAndIncrement());
+            thread.setDaemon(false);
+            return thread;
+        });
         this.httpServer.setExecutor(executorService);
         this.httpServer.createContext("/sonar/metrics",
                 new SonarMetricsHandler(sonarMetricsService, gson, activeRequests, maxConnections));
         this.httpServer.createContext("/sonar/metrics_batch",
                 new BatchSonarMetricsHandler(sonarMetricsService, gson, activeRequests, maxConnections));
         this.httpServer.createContext("/jenkins/sonar",
-                new JenkinsSonarHandler(jenkinsSonarForwardingService, gson, activeRequests, maxConnections));
+                new JenkinsSonarHandler(jenkinsSonarForwardingService, gson, activeRequests, maxConnections, callbackExecutor));
     }
 
     public void start() {
@@ -60,6 +69,7 @@ public final class SoftmanDevOpsServer {
     public void stop() {
         httpServer.stop(0);
         executorService.shutdownNow();
+        callbackExecutor.shutdownNow();
         stopLatch.countDown();
         LOGGER.info("SoftmanDevOps server stopped");
     }

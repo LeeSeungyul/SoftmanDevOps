@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,11 +30,13 @@ public final class JenkinsSonarHandler implements HttpHandler {
     private final Gson gson;
     private final AtomicInteger activeRequests;
     private final int maxConcurrentRequests;
+    private final ScheduledExecutorService scheduler;
 
     public JenkinsSonarHandler(JenkinsSonarForwardingService forwardingService,
                                Gson gson,
                                AtomicInteger activeRequests,
-                               int maxConcurrentRequests) {
+                               int maxConcurrentRequests,
+                               ScheduledExecutorService scheduler) {
         this.forwardingService = Objects.requireNonNull(forwardingService, "forwardingService");
         this.gson = Objects.requireNonNull(gson, "gson");
         this.activeRequests = Objects.requireNonNull(activeRequests, "activeRequests");
@@ -40,6 +44,7 @@ public final class JenkinsSonarHandler implements HttpHandler {
             throw new IllegalArgumentException("maxConcurrentRequests must be positive");
         }
         this.maxConcurrentRequests = maxConcurrentRequests;
+        this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     }
 
     @Override
@@ -64,6 +69,12 @@ public final class JenkinsSonarHandler implements HttpHandler {
             }
             JsonObject jsonObject = parseJson(requestBody);
             JenkinsSonarRequest request = JenkinsSonarRequest.fromJson(jsonObject);
+            if (!request.hasForwardJobs()) {
+                LOGGER.info("All Jenkins sonar jobs marked as skipped; returning local success response");
+                sendLocalSuccess(exchange, request);
+                scheduleCallback(request);
+                return;
+            }
             String forwardPayload = gson.toJson(request.forwardPayload());
             ForwardResponse response = forwardingService.forward(request, forwardPayload);
             passthrough(exchange, response);
@@ -128,6 +139,10 @@ public final class JenkinsSonarHandler implements HttpHandler {
         }
     }
 
+    private void sendLocalSuccess(HttpExchange exchange, JenkinsSonarRequest request) throws IOException {
+        sendJson(exchange, 200, request.callbackPayload());
+    }
+
     private void sendPlainText(HttpExchange exchange, int statusCode, String message) throws IOException {
         byte[] data = message.getBytes(StandardCharsets.UTF_8);
         Headers headers = exchange.getResponseHeaders();
@@ -135,6 +150,28 @@ public final class JenkinsSonarHandler implements HttpHandler {
         exchange.sendResponseHeaders(statusCode, data.length);
         try (OutputStream outputStream = exchange.getResponseBody()) {
             outputStream.write(data);
+        }
+    }
+
+    private void scheduleCallback(JenkinsSonarRequest request) {
+        long delay = Math.max(0, request.callTimeSeconds());
+        JsonObject payload = request.callbackPayload();
+        String payloadJson = gson.toJson(payload);
+        String callbackUrl = request.callbackUrl();
+        try {
+            scheduler.schedule(() -> executeCallback(callbackUrl, payloadJson), delay, TimeUnit.SECONDS);
+            LOGGER.info("Scheduled Jenkins sonar callback in {} second(s) to {}", delay, callbackUrl);
+        } catch (RuntimeException runtimeException) {
+            LOGGER.warn("Failed to schedule callback to {}: {}", callbackUrl, runtimeException.getMessage());
+        }
+    }
+
+    private void executeCallback(String callbackUrl, String payloadJson) {
+        try {
+            forwardingService.postJson(callbackUrl, payloadJson);
+            LOGGER.info("Callback delivered successfully to {}", callbackUrl);
+        } catch (ForwardingException forwardingException) {
+            LOGGER.warn("Callback delivery failed for {}: {}", callbackUrl, forwardingException.getMessage());
         }
     }
 }

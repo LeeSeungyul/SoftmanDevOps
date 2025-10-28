@@ -35,6 +35,7 @@ class JenkinsSonarEndpointIntegrationTest {
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
 
     private ForwardingStubServer forwardingStub;
+    private ForwardingStubServer callbackStub;
     private SoftmanDevOpsServer softmanServer;
     private HttpClient httpClient;
     private int serverPort;
@@ -42,6 +43,7 @@ class JenkinsSonarEndpointIntegrationTest {
     @BeforeEach
     void setUp() {
         forwardingStub = new ForwardingStubServer();
+        callbackStub = new ForwardingStubServer();
         httpClient = HttpClient.newHttpClient();
         serverPort = TestPorts.findAvailablePort();
     }
@@ -52,6 +54,7 @@ class JenkinsSonarEndpointIntegrationTest {
             softmanServer.stop();
         }
         forwardingStub.close();
+        callbackStub.close();
     }
 
     @Test
@@ -63,7 +66,10 @@ class JenkinsSonarEndpointIntegrationTest {
 
         startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
 
-        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar");
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
+        JsonObject skippedJob = new JsonObject();
+        skippedJob.addProperty("NAME", "skipped");
+        payload.getAsJsonArray("DEP_JOBS").add(skippedJob);
         HttpResponse<String> response = sendRequest(payload.toString());
         assertEquals(200, response.statusCode());
         assertEquals(upstreamBody.toString(), response.body());
@@ -79,6 +85,7 @@ class JenkinsSonarEndpointIntegrationTest {
         JsonArray jobs = forwarded.getAsJsonArray("DEP_JOBS");
         assertEquals(2, jobs.size());
         assertEquals("sm-test2", jobs.get(0).getAsJsonObject().get("NAME").getAsString());
+        assertThrows(IllegalStateException.class, () -> callbackStub.takeRequest(Duration.ofMillis(200)));
     }
 
     @Test
@@ -89,7 +96,7 @@ class JenkinsSonarEndpointIntegrationTest {
         String baseUrl = "http://localhost:" + forwardingStub.port() + "/jenkins-result-sonar";
         String callUrl = "/ignored-path";
 
-        JsonObject payload = buildPayload(baseUrl, callUrl);
+        JsonObject payload = buildPayload(baseUrl, callUrl, callbackUrl(), 0);
         HttpResponse<String> response = sendRequest(payload.toString());
         assertEquals(204, response.statusCode());
 
@@ -98,13 +105,64 @@ class JenkinsSonarEndpointIntegrationTest {
 
         JsonObject forwarded = GSON.fromJson(captured.body(), JsonObject.class);
         assertEquals(callUrl, forwarded.get("CALL_URL").getAsString());
+        assertFalse(forwarded.has("callurl"));
+        assertFalse(forwarded.has("calltime"));
+        assertThrows(IllegalStateException.class, () -> callbackStub.takeRequest(Duration.ofMillis(200)));
+    }
+
+    @Test
+    void allJobsSkippedReturnsLocalSuccess() throws Exception {
+        startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
+
+        callbackStub.enqueue(ResponsePlan.status(200));
+
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
+        JsonArray jobs = payload.getAsJsonArray("DEP_JOBS");
+        jobs.get(0).getAsJsonObject().addProperty("NAME", "skipped");
+        jobs.get(1).getAsJsonObject().addProperty("NAME", "skipped");
+
+        HttpResponse<String> response = sendRequest(payload.toString());
+        assertEquals(200, response.statusCode());
+
+        JsonObject body = GSON.fromJson(response.body(), JsonObject.class);
+        assertEquals("175", body.get("SM_ISID").getAsString());
+        assertEquals("lee.hyun-ju", body.get("SM_DEPUSER").getAsString());
+        assertEquals("DEP_JEN", body.get("WFDCODE").getAsString());
+        assertEquals("SUCCESS", body.get("RESULT").getAsString());
+        assertThrows(IllegalStateException.class, () -> forwardingStub.takeRequest(Duration.ofMillis(200)));
+
+        CapturedRequest callbackRequest = callbackStub.takeRequest(Duration.ofSeconds(1));
+        assertEquals("/callback", callbackRequest.uri().getPath());
+        JsonObject callbackBody = GSON.fromJson(callbackRequest.body(), JsonObject.class);
+        assertEquals("SUCCESS", callbackBody.get("RESULT").getAsString());
+    }
+
+    @Test
+    void callTimeAcceptsNumericString() throws Exception {
+        startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
+
+        callbackStub.enqueue(ResponsePlan.status(200));
+
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
+        payload.addProperty("calltime", "0");
+        JsonArray jobs = payload.getAsJsonArray("DEP_JOBS");
+        jobs.get(0).getAsJsonObject().addProperty("NAME", "skipped");
+        jobs.get(1).getAsJsonObject().addProperty("NAME", "skipped");
+
+        HttpResponse<String> response = sendRequest(payload.toString());
+        assertEquals(200, response.statusCode());
+
+        CapturedRequest callbackRequest = callbackStub.takeRequest(Duration.ofSeconds(1));
+        assertEquals("/callback", callbackRequest.uri().getPath());
+        JsonObject callbackBody = GSON.fromJson(callbackRequest.body(), JsonObject.class);
+        assertEquals("SUCCESS", callbackBody.get("RESULT").getAsString());
     }
 
     @Test
     void emptyDepJobsFailsValidation() throws Exception {
         startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
 
-        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar");
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
         payload.add("DEP_JOBS", new JsonArray());
 
         HttpResponse<String> response = sendRequest(payload.toString());
@@ -118,7 +176,7 @@ class JenkinsSonarEndpointIntegrationTest {
     void missingDepJobsFailsValidation() throws Exception {
         startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
 
-        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar");
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
         payload.remove("DEP_JOBS");
 
         HttpResponse<String> response = sendRequest(payload.toString());
@@ -132,7 +190,7 @@ class JenkinsSonarEndpointIntegrationTest {
     void tableTypeMustBeString() throws Exception {
         startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
 
-        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar");
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
         payload.addProperty("TABLE_TYPE", 3);
 
         HttpResponse<String> response = sendRequest(payload.toString());
@@ -153,7 +211,7 @@ class JenkinsSonarEndpointIntegrationTest {
 
         startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
 
-        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar");
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
         HttpResponse<String> response = sendRequest(payload.toString());
         assertEquals(503, response.statusCode());
         assertEquals(upstreamBody.toString(), response.body());
@@ -169,7 +227,7 @@ class JenkinsSonarEndpointIntegrationTest {
 
         startServer(Duration.ofSeconds(2), Duration.ofSeconds(10), 5);
 
-        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar");
+        JsonObject payload = buildPayload(baseUrl(), "/jenkins-result-sonar", callbackUrl(), 0);
         HttpResponse<String> response = sendRequest(payload.toString());
         assertEquals(404, response.statusCode());
         assertEquals(upstreamBody.toString(), response.body());
@@ -200,7 +258,7 @@ class JenkinsSonarEndpointIntegrationTest {
         return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
-    private JsonObject buildPayload(String baseUrl, String callUrl) {
+    private JsonObject buildPayload(String baseUrl, String callUrl, String callbackUrl, int callTimeSeconds) {
         JsonObject payload = new JsonObject();
         payload.addProperty("baseurl", baseUrl);
         payload.addProperty("SM_ISID", "175");
@@ -208,6 +266,8 @@ class JenkinsSonarEndpointIntegrationTest {
         payload.addProperty("SM_WFDCODE", "DEP_JEN");
         payload.addProperty("DEP_DATE", "2025-10-21 오전 10:46:44");
         payload.addProperty("CALL_URL", callUrl);
+        payload.addProperty("callurl", callbackUrl);
+        payload.addProperty("calltime", callTimeSeconds);
         payload.addProperty("TABLE_TYPE", "3");
         JsonArray jobs = new JsonArray();
         JsonObject first = new JsonObject();
@@ -222,5 +282,9 @@ class JenkinsSonarEndpointIntegrationTest {
 
     private String baseUrl() {
         return "http://localhost:" + forwardingStub.port() + "/jenkins-result-sonar";
+    }
+
+    private String callbackUrl() {
+        return "http://localhost:" + callbackStub.port() + "/callback";
     }
 }

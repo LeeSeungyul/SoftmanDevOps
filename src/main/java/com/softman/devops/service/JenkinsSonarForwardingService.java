@@ -37,9 +37,20 @@ public final class JenkinsSonarForwardingService {
     public ForwardResponse forward(JenkinsSonarRequest request, String payloadJson) throws ForwardingException {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(payloadJson, "payloadJson");
-        URI targetUri = buildTargetUri(request.baseUrl());
+        URI targetUri = buildUri(request.baseUrl(), "baseurl");
         LOGGER.info("Forwarding Jenkins sonar request to {}", maskUri(targetUri));
+        return send(targetUri, payloadJson);
+    }
 
+    public ForwardResponse postJson(String targetUrl, String payloadJson) throws ForwardingException {
+        Objects.requireNonNull(targetUrl, "targetUrl");
+        Objects.requireNonNull(payloadJson, "payloadJson");
+        URI targetUri = buildUri(targetUrl, "callurl");
+        LOGGER.info("Posting Jenkins sonar payload to {}", maskUri(targetUri));
+        return send(targetUri, payloadJson);
+    }
+
+    private ForwardResponse send(URI targetUri, String payloadJson) throws ForwardingException {
         HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(targetUri)
                 .timeout(requestTimeout)
@@ -64,11 +75,11 @@ public final class JenkinsSonarForwardingService {
         }
     }
 
-    private URI buildTargetUri(String baseUrl) throws ForwardingException {
+    private URI buildUri(String url, String fieldName) throws ForwardingException {
         try {
-            return new URI(baseUrl);
+            return new URI(url);
         } catch (URISyntaxException exception) {
-            throw new ForwardingException("baseurl must be a valid URI", 400, exception);
+            throw new ForwardingException(fieldName + " must be a valid URL", 400, exception);
         }
     }
 

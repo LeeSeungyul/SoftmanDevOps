@@ -87,6 +87,8 @@ Authorization: Basic base64("{token}:")
 | `SM_WFDCODE` | string | ✅ | 워크플로 코드. |
 | `DEP_DATE` | string | ✅ | 배포 시각 문자열 (서버는 파싱하지 않고 그대로 전달). |
 | `CALL_URL` | string (path) | ✅ | 다운스트림 참조 경로. 요청 본문에 그대로 포함되지만 실제 호출 URL 구성에는 사용되지 않습니다. |
+| `callurl` | string (URL) | ✅ | 모든 잡이 `skipped`일 때 콜백을 전송할 절대 URL. |
+| `calltime` | number or numeric string (seconds) | ✅ | 콜백까지 대기할 시간(초). 0 이상이어야 합니다. |
 | `TABLE_TYPE` | string | ✅ | 테이블 코드. |
 | `DEP_JOBS` | array | ✅ | 비어 있지 않은 잡 객체 배열. |
 | `DEP_JOBS[].NAME` | string | ✅ | 포워딩할 Jenkins 잡 이름. |
@@ -95,6 +97,7 @@ Authorization: Basic base64("{token}:")
 
 **포워딩 규칙**
 - 타깃 URL = 공백을 제거한 `baseurl` 값 자체입니다. (경로/쿼리가 필요하면 `baseurl`에 모두 포함해 전달하세요.)
+- `DEP_JOBS` 항목 중 `NAME` 값이 `"skipped"`(소문자)인 항목은 다운스트림으로 전달하지 않습니다. 모든 항목이 `"skipped"`이면 자체 성공 응답을 반환하고 콜백을 예약합니다.
 - 포워딩 본문 = 원본 JSON에서 `baseurl`만 제거한 나머지 필드 전체.
 - 다운스트림 요청 헤더: `Content-Type: application/json; charset=utf-8`, `Accept: application/json`.
 - 다운스트림 응답의 HTTP 상태/헤더/본문을 그대로 클라이언트에 전달하며, `content-length`/`transfer-encoding`은 서버가 재계산합니다.
@@ -110,6 +113,8 @@ curl -X POST http://localhost:5050/jenkins/sonar \
     "SM_WFDCODE": "DEP_JEN",
     "DEP_DATE": "2025-10-21 오전 10:46:44",
     "CALL_URL": "/jenkins-result-sonar",
+    "callurl": "http://192.168.0.55/internal/callback",
+    "calltime": 5,
     "TABLE_TYPE": "3",
     "DEP_JOBS": [
       { "NAME": "sm-test2" },
@@ -127,12 +132,28 @@ X-Trace-Id: trace-001
 { ... 다운스트림 원본 본문 ... }
 ```
 
+**모든 잡이 skipped일 때 응답**
+```json
+{
+  "SM_ISID": "175",
+  "SM_DEPUSER": "lee.hyun-ju",
+  "WFDCODE": "DEP_JEN",
+  "RESULT": "SUCCESS"
+}
+```
+
+- 모든 잡이 `"skipped"`인 경우 동작:
+  1. 즉시 위 JSON을 반환합니다.
+  2. `calltime`초 후 `callurl`로 동일한 본문을 `POST`합니다. 헤더는 `Content-Type: application/json; charset=utf-8`입니다.
+  3. 콜백 실패 시 재시도하지 않고 로그에만 기록합니다.
+
 ## 동작 하이라이트
 - 공정한 세마포어로 글로벌 동시성 제한 적용; 초과 요청은 즉시 HTTP 429를 받습니다.
 - 네트워크 오류, 5xx 및 429에 대해 지수 백오프(500ms 기준, 최대 5초)를 사용하여 재시도. 작업 타임아웃을 위반할 경우 백오프가 중단됩니다.
 - 효과적인 호출당 타임아웃은 결합된 타이밍 제약을 충족하기 위해 `min(--timeout, 남은 작업 데드라인)`입니다.
 - JSON 파싱은 Gson 사용; 외부 라이브러리는 Gson과 Logback으로 제한됩니다.
 - Jenkins 포워딩 엔드포인트 역시 동일한 동시성 제한을 공유하며, 로그에는 목적지 정보를 마스킹한 상태로 남습니다. 원본 페이로드의 추가 필드는 손실 없이 유지됩니다.
+- Jenkins 포워딩은 `DEP_JOBS`의 `NAME`이 `"skipped"`인 항목을 제거하고, 남는 항목이 없으면 다운스트림 호출을 생략한 채 `RESULT: "SUCCESS"` 응답을 반환한 뒤 `calltime`초 후 `callurl`로 콜백을 전송합니다.
 
 ## 빌드 및 테스트
 ```

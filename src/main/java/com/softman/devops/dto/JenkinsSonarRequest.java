@@ -20,6 +20,8 @@ public final class JenkinsSonarRequest {
             "SM_WFDCODE",
             "DEP_DATE",
             "CALL_URL",
+            "callurl",
+            "calltime",
             "TABLE_TYPE",
             "DEP_JOBS"
     );
@@ -30,6 +32,8 @@ public final class JenkinsSonarRequest {
     private final String smWfdCode;
     private final String depDate;
     private final String callUrl;
+    private final String callbackUrl;
+    private final int callTimeSeconds;
     private final String tableType;
     private final List<Job> jobs;
     private final JsonObject forwardPayload;
@@ -40,8 +44,10 @@ public final class JenkinsSonarRequest {
                                 String smWfdCode,
                                 String depDate,
                                 String callUrl,
+                                String callbackUrl,
+                                int callTimeSeconds,
                                 String tableType,
-                                List<Job> jobs,
+                                List<Job> filteredJobs,
                                 JsonObject forwardPayload) {
         this.baseUrl = baseUrl;
         this.smIsid = smIsid;
@@ -49,8 +55,10 @@ public final class JenkinsSonarRequest {
         this.smWfdCode = smWfdCode;
         this.depDate = depDate;
         this.callUrl = callUrl;
+        this.callbackUrl = callbackUrl;
+        this.callTimeSeconds = callTimeSeconds;
         this.tableType = tableType;
-        this.jobs = List.copyOf(jobs);
+        this.jobs = List.copyOf(filteredJobs);
         this.forwardPayload = Objects.requireNonNull(forwardPayload, "forwardPayload").deepCopy();
     }
 
@@ -67,12 +75,16 @@ public final class JenkinsSonarRequest {
         String smWfdCode = readRequiredString(body, "SM_WFDCODE");
         String depDate = readRequiredString(body, "DEP_DATE");
         String callUrl = readRequiredString(body, "CALL_URL");
+        String callbackUrl = readRequiredString(body, "callurl");
+        validateCallbackUrl(callbackUrl);
+        int callTimeSeconds = readRequiredNonNegativeInt(body, "calltime");
         String tableType = readRequiredString(body, "TABLE_TYPE");
 
         JsonArray jobsArray = readRequiredArray(body, "DEP_JOBS");
         List<Job> jobs = parseJobs(jobsArray);
+        List<Job> filteredJobs = filterSkippedJobs(jobs);
 
-        JsonObject forwardPayload = buildForwardPayload(body, smIsid, smDepUser, smWfdCode, depDate, callUrl, tableType, jobs);
+        JsonObject forwardPayload = buildForwardPayload(body, smIsid, smDepUser, smWfdCode, depDate, callUrl, callbackUrl, callTimeSeconds, tableType, filteredJobs);
 
         return new JenkinsSonarRequest(
                 normalizeBaseUrl(baseUrl),
@@ -81,8 +93,10 @@ public final class JenkinsSonarRequest {
                 smWfdCode,
                 depDate,
                 callUrl,
+                callbackUrl,
+                callTimeSeconds,
                 tableType,
-                jobs,
+                filteredJobs,
                 forwardPayload
         );
     }
@@ -111,6 +125,14 @@ public final class JenkinsSonarRequest {
         return callUrl;
     }
 
+    public String callbackUrl() {
+        return callbackUrl;
+    }
+
+    public int callTimeSeconds() {
+        return callTimeSeconds;
+    }
+
     public String tableType() {
         return tableType;
     }
@@ -119,8 +141,21 @@ public final class JenkinsSonarRequest {
         return jobs;
     }
 
+    public boolean hasForwardJobs() {
+        return !jobs.isEmpty();
+    }
+
     public JsonObject forwardPayload() {
         return forwardPayload.deepCopy();
+    }
+
+    public JsonObject callbackPayload() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("SM_ISID", smIsid);
+        payload.addProperty("SM_DEPUSER", smDepUser);
+        payload.addProperty("WFDCODE", smWfdCode);
+        payload.addProperty("RESULT", "SUCCESS");
+        return payload;
     }
 
     private static String readRequiredString(JsonObject body, String key) throws ValidationException {
@@ -167,6 +202,16 @@ public final class JenkinsSonarRequest {
         return jobs;
     }
 
+    private static List<Job> filterSkippedJobs(List<Job> jobs) {
+        List<Job> filtered = new ArrayList<>(jobs.size());
+        for (Job job : jobs) {
+            if (!job.isSkipped()) {
+                filtered.add(job);
+            }
+        }
+        return filtered;
+    }
+
     private static String readRequiredName(JsonObject object, int index) throws ValidationException {
         JsonElement nameElement = object.get("NAME");
         if (nameElement == null || nameElement.isJsonNull()) {
@@ -188,6 +233,8 @@ public final class JenkinsSonarRequest {
                                                   String smWfdCode,
                                                   String depDate,
                                                   String callUrl,
+                                                  String callbackUrl,
+                                                  int callTimeSeconds,
                                                   String tableType,
                                                   List<Job> jobs) {
         JsonObject payload = new JsonObject();
@@ -235,11 +282,54 @@ public final class JenkinsSonarRequest {
         }
     }
 
+    private static void validateCallbackUrl(String url) throws ValidationException {
+        try {
+            URI uri = new URI(url.trim());
+            String scheme = uri.getScheme();
+            if (scheme == null || uri.getHost() == null) {
+                throw new ValidationException("callurl must be an absolute URL");
+            }
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new ValidationException("callurl must use http or https");
+            }
+        } catch (URISyntaxException exception) {
+            throw new ValidationException("callurl must be a valid URL");
+        }
+    }
+
+    private static int readRequiredNonNegativeInt(JsonObject body, String key) throws ValidationException {
+        JsonElement element = body.get(key);
+        if (element == null || element.isJsonNull()) {
+            throw new ValidationException("Missing required field: " + key);
+        }
+        if (!element.isJsonPrimitive()) {
+            throw new ValidationException(key + " must be a number");
+        }
+        String text = element.getAsJsonPrimitive().getAsString().trim();
+        if (text.isEmpty()) {
+            throw new ValidationException(key + " must not be blank");
+        }
+        int value;
+        try {
+            value = Integer.parseInt(text);
+        } catch (NumberFormatException numberFormatException) {
+            throw new ValidationException(key + " must be a whole number");
+        }
+        if (value < 0) {
+            throw new ValidationException(key + " must not be negative");
+        }
+        return value;
+    }
+
     public record Job(String name) {
         public Job {
             if (name == null || name.isBlank()) {
                 throw new IllegalArgumentException("name must not be blank");
             }
+        }
+
+        public boolean isSkipped() {
+            return "skipped".equals(name);
         }
     }
 }
