@@ -147,6 +147,66 @@ X-Trace-Id: trace-001
   2. After `calltime` seconds, issues a `POST` request to `callurl` with the same payload and `Content-Type: application/json; charset=utf-8`.
   3. Callback delivery is fire-and-forget; failures are logged without retries.
 
+### EAI Data Lookup
+- **URL**: `/eai/data`
+- **Method**: `POST`
+- **Consumes / Produces**: `application/json; charset=utf-8`
+- **Purpose**: Receives a `HEADER`/`BODY` pair, passes the `HEADER` through unchanged, builds the expected `DATA` structure, and forwards the combined payload to the downstream base URL.
+
+**Request Envelope**
+```json
+{
+  "HEADER": { "glob_id": "CICDEAI...", "rstn_yn": 0, "err_msg": "" },
+  "BODY": {
+    "baseurl": "http://localhost:18080/eai/search",
+    "value": "keyword"
+  }
+}
+```
+- Every header value and `BODY.baseurl` / `BODY.value` must be at most **1 KB** (UTF-8). Violations result in `413 PAYLOAD_TOO_LARGE`.
+- `BODY.baseurl` must be a non-blank string; the handler posts to this URL directly.
+- `BODY.value` may be empty; when blank the handler returns `{ "resultSet": [] }` and skips the downstream call.
+- `HEADER` is forwarded verbatim, including numeric values and `null` entries.
+
+**Forwarded Payload**
+- The downstream payload is shaped as:
+```json
+{
+  "HEADER": { ...original header... },
+  "DATA": {
+    "table": "v_if_master",
+    "filters": {
+      "logic": "OR",
+      "conditions": [
+        { "field": "tx_id", "operator": "LIKE", "value": "%keyword%" },
+        { "field": "bizsystem_id", "operator": "LIKE", "value": "%keyword%" }
+      ]
+    },
+    "orderBy": [ { "field": "if_id", "direction": "ASC" } ],
+    "limit": 100
+  }
+}
+```
+- The filter list covers `tx_id`, `bizsystem_id`, `if_id`, `atcl_nm`, `version`, `if_aprc_cd`, `src_sys_cd`, `dev_src_tbl_nm`, `prd_src_tbl_nm`, `trgt_sys_cd`, `dev_trgt_tbl_nm`, `prd_trgt_tbl_nm`, `ext_if_yn`, `crnt_stng_cn`, `prs_info_yn`, `cre_dttm`, `rgst_id`, `mod_dttm`, and `mdfr_id` and they are combined with `logic = "OR"`. Duplicate field names are removed in the generated JSON.
+
+**Response Handling**
+- The downstream service is expected to reply with the same schema (`HEADER` + `DATA`). Only `DATA.resultSet` is returned to the caller:
+```json
+{
+  "resultSet": [
+    {
+      "tx_id": "tx_IFB_SAP_LLIS_0009",
+      "bizsystem_id": "EAI_EXT_BATCH",
+      "if_id": "IFB_SAP_LLIS_0009",
+      "atcl_nm": "[LLIS]LLIS ...",
+      "mdfr_id": "admin"
+    }
+  ]
+}
+```
+- Upstream headers are ignored. Non-2xx statuses or malformed bodies return `UPSTREAM_ERROR` along with the propagated HTTP status code.
+- Validation failures produce `400 BAD_REQUEST` responses with details in the `message` field.
+
 ## Behaviour Highlights
 - Global concurrency limit enforced with a fair semaphore; excess requests receive HTTP 429 immediately.
 - Retries use exponential backoff (500ms base, capped at 5s) for network errors, 5xx, and 429. Backoff is aborted if it would violate the job timeout.

@@ -3,8 +3,10 @@ package com.softman.devops;
 import com.google.gson.Gson;
 import com.softman.devops.config.ServiceConfiguration;
 import com.softman.devops.handler.BatchSonarMetricsHandler;
+import com.softman.devops.handler.EaiDataHandler;
 import com.softman.devops.handler.JenkinsSonarHandler;
 import com.softman.devops.handler.SonarMetricsHandler;
+import com.softman.devops.service.EaiDataService;
 import com.softman.devops.service.SonarMetricsService;
 import com.softman.devops.service.JenkinsSonarForwardingService;
 import com.sun.net.httpserver.HttpServer;
@@ -33,10 +35,12 @@ public final class SoftmanDevOpsServer {
     public SoftmanDevOpsServer(ServiceConfiguration configuration,
                                SonarMetricsService sonarMetricsService,
                                JenkinsSonarForwardingService jenkinsSonarForwardingService,
+                               EaiDataService eaiDataService,
                                Gson gson) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(sonarMetricsService, "sonarMetricsService");
         Objects.requireNonNull(jenkinsSonarForwardingService, "jenkinsSonarForwardingService");
+        Objects.requireNonNull(eaiDataService, "eaiDataService");
         Objects.requireNonNull(gson, "gson");
         try {
             this.httpServer = HttpServer.create(new InetSocketAddress(configuration.getPort()), 0);
@@ -59,6 +63,8 @@ public final class SoftmanDevOpsServer {
                 new BatchSonarMetricsHandler(sonarMetricsService, gson, activeRequests, maxConnections));
         this.httpServer.createContext("/jenkins/sonar",
                 new JenkinsSonarHandler(jenkinsSonarForwardingService, gson, activeRequests, maxConnections, callbackExecutor));
+        this.httpServer.createContext("/eai/data",
+                new EaiDataHandler(eaiDataService, gson, activeRequests, maxConnections));
     }
 
     public void start() {

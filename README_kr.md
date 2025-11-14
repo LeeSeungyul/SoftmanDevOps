@@ -147,6 +147,65 @@ X-Trace-Id: trace-001
   2. `calltime`초 후 `callurl`로 동일한 본문을 `POST`합니다. 헤더는 `Content-Type: application/json; charset=utf-8`입니다.
   3. 콜백 실패 시 재시도하지 않고 로그에만 기록합니다.
 
+### EAI 데이터 조회
+- **URL**: `/eai/data`
+- **메서드**: `POST`
+- **Consumes / Produces**: `application/json; charset=utf-8`
+- **역할**: 호출자가 전달한 `HEADER` 객체를 수정 없이 보존하고, `BODY.value`를 이용해 `DATA` 구조를 생성한 뒤 `BODY.baseurl`에 동기 호출을 수행합니다.
+
+**요청 Envelope**
+```json
+{
+  "HEADER": { "glob_id": "CICDEAI...", "rstn_yn": 0, "err_msg": "" },
+  "BODY": {
+    "baseurl": "http://localhost:18080/eai/search",
+    "value": "keyword"
+  }
+}
+```
+- `HEADER`의 각 값과 `BODY.baseurl`, `BODY.value`는 UTF-8 기준 1KB 이하여야 하며, 초과 시 `413 PAYLOAD_TOO_LARGE`를 반환합니다.
+- `BODY.baseurl`은 공백이 아닌 문자열이어야 하며 그대로 호출 URL로 사용됩니다.
+- `BODY.value`가 빈 문자열(혹은 공백뿐)인 경우 업스트림 호출을 생략하고 즉시 `{ "resultSet": [] }`를 반환합니다.
+- `HEADER`는 문자열, 숫자, 불리언, `null` 등 원시 타입만 허용하며 값은 그대로 전달됩니다.
+
+**전달되는 페이로드**
+```json
+{
+  "HEADER": { ...원본 헤더... },
+  "DATA": {
+    "table": "v_if_master",
+    "filters": {
+      "logic": "OR",
+      "conditions": [
+        { "field": "tx_id", "operator": "LIKE", "value": "%keyword%" },
+        { "field": "bizsystem_id", "operator": "LIKE", "value": "%keyword%" }
+      ]
+    },
+    "orderBy": [ { "field": "if_id", "direction": "ASC" } ],
+    "limit": 100
+  }
+}
+```
+- `value`는 항상 `%value%` 패턴으로 감싸져 `LIKE` 조건에 사용되며, 필드 목록(tx_id, bizsystem_id, if_id, atcl_nm, version, if_aprc_cd, src_sys_cd, dev_src_tbl_nm, prd_src_tbl_nm, trgt_sys_cd, dev_trgt_tbl_nm, prd_trgt_tbl_nm, ext_if_yn, crnt_stng_cn, prs_info_yn, cre_dttm, rgst_id, mod_dttm, mdfr_id) 전체를 `logic = "OR"` 조건으로 묶습니다. 목록에 중복이 있더라도 서비스가 자동으로 제거합니다.
+
+**응답 처리**
+- 업스트림에서 돌려준 JSON 중 `DATA.resultSet`만 추출하여 호출자에게 반환합니다:
+```json
+{
+  "resultSet": [
+    {
+      "tx_id": "tx_IFB_SAP_LLIS_0009",
+      "bizsystem_id": "EAI_EXT_BATCH",
+      "if_id": "IFB_SAP_LLIS_0009",
+      "atcl_nm": "[LLIS]LLIS ...",
+      "mdfr_id": "admin"
+    }
+  ]
+}
+```
+- 다운스트림 `HEADER`는 무시되며, 비정상 상태 코드나 JSON 구조 오류는 `UPSTREAM_ERROR`와 함께 해당 HTTP 상태코드를 전파합니다.
+- 검증 실패는 `400 BAD_REQUEST`, 길이 제한 위반은 `413 PAYLOAD_TOO_LARGE`로 응답합니다.
+
 ## 동작 하이라이트
 - 공정한 세마포어로 글로벌 동시성 제한 적용; 초과 요청은 즉시 HTTP 429를 받습니다.
 - 네트워크 오류, 5xx 및 429에 대해 지수 백오프(500ms 기준, 최대 5초)를 사용하여 재시도. 작업 타임아웃을 위반할 경우 백오프가 중단됩니다.

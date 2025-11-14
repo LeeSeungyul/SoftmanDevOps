@@ -12,6 +12,9 @@ import com.google.gson.JsonObject;
 import com.softman.devops.SoftmanDevOpsServer;
 import com.softman.devops.config.LogLevel;
 import com.softman.devops.config.ServiceConfiguration;
+import com.softman.devops.service.EaiDataForwardingClient;
+import com.softman.devops.service.EaiDataPayloadBuilder;
+import com.softman.devops.service.EaiDataService;
 import com.softman.devops.service.JenkinsSonarForwardingService;
 import com.softman.devops.service.SonarMetricsService;
 import com.softman.devops.support.ForwardingStubServer;
@@ -245,7 +248,9 @@ class JenkinsSonarEndpointIntegrationTest {
         );
         SonarMetricsService sonarMetricsService = new SonarMetricsService(timeout, jobTimeout);
         JenkinsSonarForwardingService forwardingService = new JenkinsSonarForwardingService(timeout);
-        softmanServer = new SoftmanDevOpsServer(configuration, sonarMetricsService, forwardingService, GSON);
+        EaiDataService eaiDataService = new EaiDataService(new EaiDataPayloadBuilder(),
+                new EaiDataForwardingClient(timeout, GSON));
+        softmanServer = new SoftmanDevOpsServer(configuration, sonarMetricsService, forwardingService, eaiDataService, GSON);
         softmanServer.start();
     }
 
