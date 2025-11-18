@@ -187,7 +187,7 @@ X-Trace-Id: trace-001
   }
 }
 ```
-- The filter list covers `tx_id`, `bizsystem_id`, `if_id`, `atcl_nm`, `version`, `if_aprc_cd`, `src_sys_cd`, `dev_src_tbl_nm`, `prd_src_tbl_nm`, `trgt_sys_cd`, `dev_trgt_tbl_nm`, `prd_trgt_tbl_nm`, `ext_if_yn`, `crnt_stng_cn`, `prs_info_yn`, `cre_dttm`, `rgst_id`, `mod_dttm`, and `mdfr_id` and they are combined with `logic = "OR"`. Duplicate field names are removed in the generated JSON.
+- The filter list covers `tx_id`, `bizsystem_id`, `if_id`, `atcl_nm`, `version`, `if_aprc_cd`, `src_sys_cd`, `dev_src_tbl_nm`, `prd_src_tbl_nm`, `trgt_sys_cd`, `dev_trgt_tbl_nm`, `prd_trgt_tbl_nm`, `ext_if_yn`, `crnt_stng_cn`, `prs_info_yn`, `rgst_id`, and `mdfr_id` and they are combined with `logic = "OR"`. Duplicate field names are removed in the generated JSON.
 
 **Response Handling**
 - The downstream service is expected to reply with the same schema (`HEADER` + `DATA`). Only `DATA.resultSet` is returned to the caller:

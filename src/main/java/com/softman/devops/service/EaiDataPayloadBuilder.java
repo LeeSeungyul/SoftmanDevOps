@@ -23,9 +23,7 @@ public final class EaiDataPayloadBuilder {
             "ext_if_yn",
             "crnt_stng_cn",
             "prs_info_yn",
-            "cre_dttm",
             "rgst_id",
-            "mod_dttm",
             "mdfr_id"
     );
 

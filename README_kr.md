@@ -186,7 +186,7 @@ X-Trace-Id: trace-001
   }
 }
 ```
-- `value`는 항상 `%value%` 패턴으로 감싸져 `LIKE` 조건에 사용되며, 필드 목록(tx_id, bizsystem_id, if_id, atcl_nm, version, if_aprc_cd, src_sys_cd, dev_src_tbl_nm, prd_src_tbl_nm, trgt_sys_cd, dev_trgt_tbl_nm, prd_trgt_tbl_nm, ext_if_yn, crnt_stng_cn, prs_info_yn, cre_dttm, rgst_id, mod_dttm, mdfr_id) 전체를 `logic = "OR"` 조건으로 묶습니다. 목록에 중복이 있더라도 서비스가 자동으로 제거합니다.
+- `value`는 항상 `%value%` 패턴으로 감싸져 `LIKE` 조건에 사용되며, 필드 목록(tx_id, bizsystem_id, if_id, atcl_nm, version, if_aprc_cd, src_sys_cd, dev_src_tbl_nm, prd_src_tbl_nm, trgt_sys_cd, dev_trgt_tbl_nm, prd_trgt_tbl_nm, ext_if_yn, crnt_stng_cn, prs_info_yn, rgst_id, mdfr_id) 전체를 `logic = "OR"` 조건으로 묶습니다. 목록에 중복이 있더라도 서비스가 자동으로 제거합니다.
 
 **응답 처리**
 - 업스트림에서 돌려준 JSON 중 `DATA.resultSet`만 추출하여 호출자에게 반환합니다:
